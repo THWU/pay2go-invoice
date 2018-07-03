@@ -1,0 +1,27 @@
+{
+  "name": "pay2go-invoice",
+  "version": "1.0.0",
+  "description": "智付寶pay2go API node.js lib",
+  "main": "pay2go-invoice.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/THWU/pay2go-invoice.git"
+  },
+  "keywords": [
+    "智付寶",
+    "pay2go",
+    "node.js"
+  ],
+  "author": "THWU",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/THWU/pay2go-invoice/issues"
+  },
+  "homepage": "https://github.com/THWU/pay2go-invoice#readme",
+  "dependencies": {
+    "request": "^2.81.0"
+  }
+}
