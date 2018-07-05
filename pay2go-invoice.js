@@ -1,16 +1,25 @@
+/**
+ * pay2go-invoice
+ * reference by Pay2go invoice V.1.1.8 API doc
+ * https://cinv.pay2go.com/Invoice_index/download
+ */
+"use strict";
+
 const request = require('request');
 const crypto = require('crypto');
+const querystring = require('querystring');
 
 const _testEndPoint = 'https://cinv.pay2go.com/API'; //  測試環境
 const _formalEndPoint = 'https://inv.pay2go.com/API'; //  正式環境
 
+//  開立發票
 let issue = function (postData, config) {
   return new Promise(function (resolve, reject) {
     //  檢查參數
     checkConfig(config);
     config.API = '/invoice_issue';
     buildRequest(postData, config)
-    .then((TransactionInfo) => send(TransactionInfo))
+    .then((TransactionInfo) => send(TransactionInfo, config))
     .then((TransactionInfo) => {
       resolve(TransactionInfo);
     })
@@ -20,30 +29,64 @@ let issue = function (postData, config) {
   });
 }
 
-let buildRequest = function(postData, config) {
+//  作廢發票
+let invalid = function (postData, config) {
   return new Promise(function (resolve, reject) {
-    const RequestBody = {};
-    RequestBody.MerchantID_ = config.MerchantID;
-    RequestBody.PostData_ = encryptParams(JSON.stringify(postData), config);  //  AES256 加密
-     //  存成 RequestInfo 物件
-     var RequestInfo = {};
-     RequestInfo.SendDate = `${new Date().toLocaleString()}.${new Date().getMilliseconds()}`;
-     RequestInfo.HostURL = config.testMode ? _testEndPoint : _formalEndPoint;
-     RequestInfo.API = config.API;
-     RequestInfo.QueryString = '';
-     RequestInfo.Method = 'POST';
-     RequestInfo.Body = RequestBody;
-     //  建立 ResponseInfo 物件
-     var ResponseInfo = {};
-     //  建立 TransactionInfo 物件
-     var TransactionInfo = {};
-     TransactionInfo.RequestInfo = RequestInfo;
-     TransactionInfo.ResponseInfo = ResponseInfo;
-     resolve(TransactionInfo);
+    //  檢查參數
+    checkConfig(config);
+    config.API = '/invoice_invalid';
+    buildRequest(postData, config)
+    .then((TransactionInfo) => send(TransactionInfo, config))
+    .then((TransactionInfo) => {
+      resolve(TransactionInfo);
+    })
+    .catch((TransactionInfo) => {
+      reject(TransactionInfo);
+    });
   });
 }
 
-let send = function (TransactionInfo) {
+//  開立折讓
+let allowance = function (postData, config) {
+  return new Promise(function (resolve, reject) {
+    //  檢查參數
+    checkConfig(config);
+    config.API = '/allowance_issue';
+    buildRequest(postData, config)
+    .then((TransactionInfo) => send(TransactionInfo, config))
+    .then((TransactionInfo) => {
+      resolve(TransactionInfo);
+    })
+    .catch((TransactionInfo) => {
+      reject(TransactionInfo);
+    });
+  });
+}
+
+let buildRequest = function (postData, config) {
+  return new Promise(function (resolve, reject) {
+    const RequestBody = {};
+    RequestBody.MerchantID_ = config.MerchantID;
+    RequestBody.PostData_ = encryptParams(querystring.stringify(postData), config); //  AES256 加密
+    //  存成 RequestInfo 物件
+    let RequestInfo = {};
+    RequestInfo.SendDate = `${new Date().toLocaleString()}.${new Date().getMilliseconds()}`;
+    RequestInfo.HostURL = config.testMode ? _testEndPoint : _formalEndPoint;
+    RequestInfo.API = config.API;
+    RequestInfo.QueryString = '';
+    RequestInfo.Method = 'POST';
+    RequestInfo.Body = RequestBody;
+    //  建立 ResponseInfo 物件
+    let ResponseInfo = {};
+    //  建立 TransactionInfo 物件
+    let TransactionInfo = {};
+    TransactionInfo.RequestInfo = RequestInfo;
+    TransactionInfo.ResponseInfo = ResponseInfo;
+    resolve(TransactionInfo);
+  });
+}
+
+let send = function (TransactionInfo, config) {
   return new Promise(function (resolve, reject) {
     request({
       uri: `${TransactionInfo.RequestInfo.HostURL}${TransactionInfo.RequestInfo.API}`,
@@ -56,22 +99,32 @@ let send = function (TransactionInfo) {
     }, function (error, response, body) {
       TransactionInfo.ResponseInfo.ReceiveDate = `${new Date().toLocaleString()}.${new Date().getMilliseconds()}`;
       TransactionInfo.ResponseInfo.Error = error;
-      TransactionInfo.ResponseInfo.StatusCode = response.statusCode;
       TransactionInfo.ResponseInfo.Body = body;
       if (!error && response.statusCode == 200) {
+        TransactionInfo.ResponseInfo.StatusCode = response.statusCode;
         let responseBody = JSON.parse(TransactionInfo.ResponseInfo.Body);
+        //  取得錯誤訊息
         if (responseBody.Status !== 'SUCCESS') {
           responseBody.StatusMessage = _errorCode[responseBody.Status];
+        }else {
+          //  確認檢查碼
+          let Result = JSON.parse(responseBody.Result);
+          if (Result.CheckCode === CheckCode(Result, config)) {
+            responseBody.CheckCode_checkResult = 'valid';
+          }else {
+            responseBody.CheckCode_checkResult = 'invalid';
+          }
         }
         TransactionInfo.ResponseInfo.Body = JSON.stringify(responseBody);
         resolve(TransactionInfo);
-      }else {
+      } else {
         reject(TransactionInfo);
       }
     });
   });
 }
 
+//  檢查 Config 資料
 let checkConfig = function (config) {
   //  檢查設定檔
   if (!config.testMode) throw 'miss test mode choice';
@@ -80,13 +133,27 @@ let checkConfig = function (config) {
   if (!config.HashIV) throw 'miss Hash IV';
 }
 
+//  加密參數：使用 AES 256 CBC
 let encryptParams = function (postData, config) {
-  //  AES256 加密
   let cipher = crypto.createCipheriv('aes-256-cbc', config.HashKey, config.HashIV);
   let encryptedData = cipher.update(postData, 'utf8', 'hex') + cipher.final('hex');
   return encryptedData;
 }
 
+let CheckCode = function (Result, config) {
+  let params = {};
+  params.HashIV = config.HashIV;
+  params.InvoiceTransNo = Result.InvoiceTransNo ? Result.InvoiceTransNo : '';
+  params.MerchantID = Result.MerchantID ? Result.MerchantID : '';
+  params.MerchantOrderNo = Result.MerchantOrderNo ? Result.MerchantOrderNo : '';
+  params.RandomNum = Result.RandomNum ? Result.RandomNum : '';
+  params.TotalAmt = Result.TotalAmt ? Result.TotalAmt : '';
+  params.HashKey = config.HashKey;
+  let checkCode = crypto.createHash('sha256').update(querystring.stringify(params)).digest('hex').toUpperCase();
+  return checkCode;
+}
+
+//  官方錯誤代碼對應表
 const _errorCode = {
   KEY10002: '資料解密錯誤',
   KEY10004: '資料不齊全',
@@ -120,5 +187,7 @@ const _errorCode = {
 }
 
 module.exports = {
-  issue: issue 
+  issue: issue,
+  invalid: invalid,
+  allowance: allowance,
 };
